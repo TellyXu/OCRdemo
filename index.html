@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OCR 文档识别系统</title>
-    <!-- 引入 markdown-it 库 -->
-    <script src="https://cdn.jsdelivr.net/npm/markdown-it@12/dist/markdown-it.min.js"></script>
-    <!-- 引入 highlight.js 库和样式 -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/highlight.min.js"></script>
+    <!-- 使用更可靠的CDN加载markdown-it -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/12.3.2/markdown-it.min.js"></script>
+    <!-- 使用更可靠的CDN加载highlight.js和样式 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -418,6 +418,21 @@
             opacity: 0.3;
         }
 
+        /* 跨域错误提示 */
+        .cors-notice {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: #fee2e2;
+            border-radius: 6px;
+            color: #b91c1c;
+            font-size: 0.9rem;
+            display: none;
+        }
+
+        .cors-notice.show {
+            display: block;
+        }
+
         /* Markdown 渲染样式增强 */
         .markdown-body {
             font-size: 16px;
@@ -519,6 +534,16 @@
             color: #57606a;
             border-left: 0.25em solid #d0d7de;
         }
+        
+        /* 模拟结果 */
+        .demo-warning {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            background-color: #fffbeb;
+            border-left: 4px solid #f59e0b;
+            color: #92400e;
+            font-size: 0.9rem;
+        }
     </style>
 </head>
 <body>
@@ -547,6 +572,15 @@
                 <button class="submit-button" id="submitButton" disabled>开始识别</button>
 
                 <div class="status" id="status"></div>
+                <div class="cors-notice" id="corsNotice">
+                    <strong>⚠️ 跨域访问错误</strong>
+                    <p>由于浏览器的安全限制，直接从本地文件访问远程API时可能会遇到跨域问题。要解决此问题，请尝试以下方法：</p>
+                    <ol style="margin-top: 0.5rem; padding-left: 1.5rem;">
+                        <li>使用 Python 测试脚本代替网页界面</li>
+                        <li>通过本地服务器打开此HTML文件</li>
+                        <li>使用像 CORS Everywhere 这样的浏览器扩展</li>
+                    </ol>
+                </div>
             </div>
 
             <!-- 结果区域 -->
@@ -563,6 +597,9 @@
     </div>
 
     <script>
+        // 判断是否为本地文件运行
+        const isLocalFile = window.location.protocol === 'file:';
+        
         // 初始化 markdown-it 实例
         const md = window.markdownit({
             html: true,
@@ -574,7 +611,7 @@
                         return hljs.highlight(str, { language: lang }).value;
                     } catch (__) {}
                 }
-                return ''; // 使用默认转义
+                return '';
             }
         });
         
@@ -590,6 +627,7 @@
         const submitButton = document.getElementById('submitButton');
         const status = document.getElementById('status');
         const resultContainer = document.getElementById('resultContainer');
+        const corsNotice = document.getElementById('corsNotice');
 
         let selectedFile = null;
 
@@ -639,6 +677,7 @@
             fileInfo.classList.add('show');
             submitButton.disabled = false;
             status.classList.remove('show');
+            corsNotice.classList.remove('show');
         }
 
         // 格式化文件大小
@@ -675,6 +714,11 @@
             }
         }
 
+        // 检查是否为本地文件并显示警告
+        if (isLocalFile) {
+            console.warn("在本地文件模式下运行可能会遇到跨域问题。建议通过本地服务器运行此文件。");
+        }
+
         // 提交文件
         submitButton.addEventListener('click', async () => {
             if (!selectedFile) return;
@@ -683,38 +727,122 @@
             showStatus('正在上传文件...', 'processing');
 
             try {
-                // 上传文件
-                const formData = new FormData();
-                formData.append('file', selectedFile);
+                // 在本地文件模式下使用模拟数据
+                if (isLocalFile) {
+                    // 模拟上传和处理
+                    await simulateProcessing();
+                } else {
+                    // 正常上传文件
+                    const formData = new FormData();
+                    formData.append('file', selectedFile);
 
-                const uploadResponse = await fetch(`${API_BASE_URL}/convert`, {
-                    method: 'POST',
-                    body: formData
-                });
+                    const uploadResponse = await fetch(`${API_BASE_URL}/convert`, {
+                        method: 'POST',
+                        body: formData
+                    });
 
-                if (!uploadResponse.ok) {
-                    throw new Error('文件上传失败');
+                    if (!uploadResponse.ok) {
+                        throw new Error('文件上传失败');
+                    }
+
+                    const uploadResult = await uploadResponse.json();
+                    const taskId = uploadResult.task_id;
+
+                    showStatus('文件已上传，正在识别中...', 'processing');
+
+                    // 轮询检查任务状态
+                    const result = await pollTaskStatus(taskId);
+                    
+                    // 显示结果
+                    const resultResponse = await fetch(`${API_BASE_URL}/result/${taskId}`);
+                    const markdownText = await resultResponse.text();
+                    displayResult(markdownText, taskId);
                 }
 
-                const uploadResult = await uploadResponse.json();
-                const taskId = uploadResult.task_id;
-
-                showStatus('文件已上传，正在识别中...', 'processing');
-
-                // 轮询检查任务状态
-                const result = await pollTaskStatus(taskId);
-                
-                // 显示结果
-                displayResult(result, taskId);
                 showStatus('识别完成！', 'success');
 
             } catch (error) {
                 console.error('Error:', error);
                 showStatus('处理失败：' + error.message, 'error');
+                
+                // 检查是否是跨域问题
+                if (error.message.includes('access control') || 
+                    error.message.includes('CORS') || 
+                    error.message.includes('跨域')) {
+                    corsNotice.classList.add('show');
+                }
             } finally {
                 submitButton.disabled = false;
             }
         });
+
+        // 模拟处理过程(用于本地文件模式)
+        async function simulateProcessing() {
+            // 模拟上传
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            
+            // 模拟处理
+            const steps = 10;
+            for (let i = 1; i <= steps; i++) {
+                showStatus('正在识别中...', 'processing', {
+                    current: i,
+                    total: steps
+                });
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            
+            // 模拟结束，显示演示结果
+            const demoMarkdown = generateDemoMarkdown(selectedFile.name);
+            displayResult(demoMarkdown, 'demo-123');
+        }
+
+        // 生成演示用的Markdown文本
+        function generateDemoMarkdown(filename) {
+            const now = new Date().toLocaleString();
+            return `# OCR 识别结果
+
+## 文档信息
+
+- **文件名**: ${filename}
+- **处理时间**: ${now}
+- **状态**: 完成
+
+## 识别内容
+
+这是一段演示文本，因为您正在本地模式下运行前端应用。要获取真实的OCR结果，需要解决跨域问题或使用Python测试脚本。
+
+### 示例段落
+
+这是第一段文字。OCR技术使用计算机视觉和机器学习算法，从图像或PDF文档中提取文本内容。现代OCR系统可以识别多种语言和字体。
+
+### 示例代码
+
+\`\`\`python
+def hello_ocr():
+    print("欢迎使用OCR系统!")
+    return "识别成功"
+
+# 调用函数
+result = hello_ocr()
+\`\`\`
+
+### 示例表格
+
+| 项目 | 描述 | 状态 |
+|------|------|------|
+| 文本识别 | 识别文档中的文本内容 | ✅ |
+| 表格识别 | 识别文档中的表格结构 | ✅ |
+| 公式识别 | 识别数学公式 | ✅ |
+
+## 注意事项
+
+* 这只是一个演示结果
+* 实际识别效果取决于原始文档质量
+* 如需真实OCR处理，请解决跨域问题
+
+感谢使用我们的OCR系统！
+`;
+        }
 
         // 轮询任务状态
         async function pollTaskStatus(taskId) {
@@ -750,17 +878,25 @@
         }
 
         // 显示结果
-        async function displayResult(taskResult, taskId) {
+        function displayResult(markdownText, taskId) {
             try {
-                // 获取 Markdown 结果
-                const resultResponse = await fetch(`${API_BASE_URL}/result/${taskId}`);
-                const markdownText = await resultResponse.text();
-
                 // 使用 markdown-it 渲染 Markdown
                 const renderedHtml = md.render(markdownText);
 
+                // 添加演示模式警告(如果是本地文件模式)
+                let demoWarning = '';
+                if (isLocalFile) {
+                    demoWarning = `
+                        <div class="demo-warning">
+                            <strong>📢 本地演示模式</strong>
+                            <p>您正在本地文件模式下预览OCR功能。这是模拟的结果，不是真实的OCR处理结果。</p>
+                        </div>
+                    `;
+                }
+
                 // 创建结果显示区域，添加标签页
                 resultContainer.innerHTML = `
+                    ${demoWarning}
                     <div class="tabs">
                         <div class="tab active" data-tab="rendered">
                             <span class="tab-icon">📝</span>
@@ -786,12 +922,20 @@
                     </div>
                     
                     <div class="result-actions">
-                        <a href="${API_BASE_URL}/result/${taskId}" download="result.md" class="download-button">
-                            📥 下载 Markdown
-                        </a>
-                        <a href="${API_BASE_URL}/json/${taskId}" download="result.json" class="download-button json">
-                            📊 下载 JSON
-                        </a>
+                        ${isLocalFile ? 
+                            `<a href="#" onclick="saveTextAsFile('${escapeHtml(markdownText)}', 'result.md'); return false;" class="download-button">
+                                📥 下载 Markdown
+                            </a>
+                            <a href="#" onclick="saveTextAsFile(JSON.stringify({text: '模拟数据'}, null, 2), 'result.json'); return false;" class="download-button json">
+                                📊 下载 JSON
+                            </a>` :
+                            `<a href="${API_BASE_URL}/result/${taskId}" download="result.md" class="download-button">
+                                📥 下载 Markdown
+                            </a>
+                            <a href="${API_BASE_URL}/json/${taskId}" download="result.json" class="download-button json">
+                                📊 下载 JSON
+                            </a>`
+                        }
                     </div>
                 `;
                 
@@ -838,7 +982,6 @@
                             });
                     });
                 }
-
             } catch (error) {
                 console.error('Error displaying result:', error);
                 resultContainer.innerHTML = `
@@ -848,6 +991,17 @@
                     </div>
                 `;
             }
+        }
+
+        // 本地保存文件的辅助函数(用于本地模式)
+        function saveTextAsFile(text, filename) {
+            const blob = new Blob([text], {type: 'text/plain;charset=utf-8'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
         }
         
         // 转义 HTML 字符
